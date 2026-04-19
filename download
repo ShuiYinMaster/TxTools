@@ -1,0 +1,127 @@
+# ============================================================
+# Build outputs
+# ============================================================
+[Bb]in/
+[Oo]bj/
+[Dd]ebug/
+[Rr]elease/
+[Ll]og/
+[Ll]ogs/
+x64/
+x86/
+Win32/
+ARM/
+ARM64/
+bld/
+[Tt]est[Rr]esult*/
+[Bb]uild[Ll]og.*
+
+# Build artifacts
+*.dll
+*.pdb
+*.exe
+*.cache
+*.ilk
+*.meta
+*.obj
+*.iobj
+*.ipdb
+*.lib
+*.sbr
+*.tlb
+*.tli
+*.tlh
+*.tmp
+*.tmp_proj
+*_wpftmp.csproj
+*.log
+*.vspscc
+*.vssscc
+.builds
+
+# ============================================================
+# Visual Studio
+# ============================================================
+.vs/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.vsidx
+*.lock.json
+*.psess
+*.vsp
+*.vspx
+*.sap
+
+# VS code coverage
+*.coverage
+*.coveragexml
+
+# VS profiler
+*.[Pp]ublish.xml
+*.azurePubxml
+
+# ============================================================
+# Rider / ReSharper
+# ============================================================
+.idea/
+_ReSharper*/
+*.[Rr]e[Ss]harper
+*.DotSettings.user
+
+# ============================================================
+# NuGet
+# ============================================================
+*.nupkg
+*.snupkg
+**/[Pp]ackages/*
+!**/[Pp]ackages/build/
+project.lock.json
+project.fragment.lock.json
+artifacts/
+
+# ============================================================
+# OS files
+# ============================================================
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+.DS_Store
+
+# ============================================================
+# Process Simulate / CATIA generated files
+# ============================================================
+# These are model/geometry artifacts that should not be checked in.
+# Uncomment if you want sample data tracked.
+*.cgr
+*.CATPart
+*.CATProduct
+*.CATShape
+*.CATMaterial
+*.model
+*.exp
+*.3dxml
+
+# PS study / session files
+*.psz
+*.psx
+*.pse
+*.cojt
+
+# ============================================================
+# Office / Excel temp
+# ============================================================
+~$*
+*.xlsm.bak
+*.xlsx.bak
+
+# ============================================================
+# Local configuration / secrets
+# ============================================================
+*.local.config
+appsettings.Local.json
+secrets.json
+.env
+.env.local
