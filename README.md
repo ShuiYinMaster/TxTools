@@ -44,16 +44,25 @@ The plugins share a common foundation (`PsReader`-style data extraction, a consi
 
 1. Clone this repository.
 2. Open the `.sln` in Visual Studio.
-3. Add a reference to `Tecnomatix.Engineering.dll` from your Process Simulate installation (typically `C:\Program Files\Tecnomatix_xxxx\eMPower\`).
+3. Add a reference to `Tecnomatix.Engineering.dll` from your Process Simulate installation (e.g. `C:\Program Files\Tecnomatix_2402\eMPower\`).
 4. Build in `Release / x64` mode.
-5. Copy the resulting `.dll` to the PS plugins folder, typically `C:\Program Files\Tecnomatix_xxxx\eMPower\` or your user plugins directory.
+5. Copy the resulting `.dll` (together with its folder) into `<Tecnomatix installation>\eMPower\DotNetCommands\<PluginName>\`.
 
 ### Installation in Process Simulate
 
-1. Open Process Simulate.
-2. `File → Options → Customize → Commands → .NET Commands` (path may vary slightly by version).
-3. Click `Add` and select the compiled plugin DLL.
-4. Drag the new command to any toolbar.
+Plugin DLLs live under `Tecnomatix_2402\eMPower\DotNetCommands\<PluginName>\`. Registration is done via the official `CommandReg.exe` utility shipped with Process Simulate.
+
+1. Navigate to `<Tecnomatix installation>\eMPower\` and run `CommandReg.exe`.
+2. In the `Register Command` dialog:
+   - **Assembly**: click `Browse...` and select your compiled plugin DLL (e.g. `DotNetCommands\TxTools\TxTools.dll`).
+   - **Class(es)**: the dialog lists all `TxButtonCommand` classes found in the assembly — tick the ones you want to register (e.g. `ExportGunCmd`, `DeviceZAlignerCmd`, `RobotReachabilityCheckerCmd`).
+   - **Product(s)**: tick the PS products where the commands should appear (`Process Simulate` is usually enough; `eM-Review` and `Process Designer` are optional).
+   - **File**: pick or create an XML file that will store the registration (e.g. `TxTools.xml`).
+   - Click `Register`.
+3. Launch Process Simulate.
+4. Open `Customize` and find the newly registered commands — drag them onto any toolbar.
+
+To remove commands, re-open `CommandReg.exe`, select the same XML file, and click `Unregister`.
 
 ### Coding Conventions
 
@@ -103,16 +112,25 @@ TxTools 是一组基于 `Tecnomatix.Engineering` SDK 开发的 Process Simulate 
 
 1. Clone 本仓库
 2. 在 Visual Studio 中打开 `.sln`
-3. 从你的 Process Simulate 安装目录引用 `Tecnomatix.Engineering.dll`（通常位于 `C:\Program Files\Tecnomatix_xxxx\eMPower\`）
+3. 从你的 Process Simulate 安装目录引用 `Tecnomatix.Engineering.dll`（例如 `C:\Program Files\Tecnomatix_2402\eMPower\`）
 4. 以 `Release / x64` 模式编译
-5. 把生成的 `.dll` 放到 PS 插件目录（通常是 `C:\Program Files\Tecnomatix_xxxx\eMPower\` 或用户插件目录）
+5. 把生成的 `.dll`（含其所属文件夹）放到 `<Tecnomatix 安装目录>\eMPower\DotNetCommands\<插件名>\`
 
 ### 在 Process Simulate 中注册插件
 
-1. 打开 Process Simulate
-2. `文件 → 选项 → 自定义 → 命令 → .NET 命令`（具体路径视版本略有不同）
-3. 点击 `添加`，选择编译好的插件 DLL
-4. 把新命令拖到任一工具栏
+插件 DLL 一般位于 `Tecnomatix_2402\eMPower\DotNetCommands\<插件名>\`，注册通过 PS 随附的官方工具 `CommandReg.exe` 完成。
+
+1. 进入 `<Tecnomatix 安装目录>\eMPower\`，运行 `CommandReg.exe`
+2. 在 `Register Command` 对话框中：
+   - **Assembly**：点 `Browse...` 选中你编译好的插件 DLL（例如 `DotNetCommands\TxTools\TxTools.dll`）
+   - **Class(es)**：对话框会列出程序集里所有 `TxButtonCommand` 类——勾选你要注册的命令（例如 `ExportGunCmd`、`DeviceZAlignerCmd`、`RobotReachabilityCheckerCmd`）
+   - **Product(s)**：勾选希望命令出现的 PS 产品（一般勾 `Process Simulate` 即可；`eM-Review` 和 `Process Designer` 可选）
+   - **File**：选择或新建一个用于保存注册信息的 XML 文件（例如 `TxTools.xml`）
+   - 点击 `Register`
+3. 启动 Process Simulate
+4. 打开"自定义"界面，找到新注册的命令，拖到任一工具栏
+
+需要卸载命令时，重新打开 `CommandReg.exe`，选中同一个 XML 文件，点击 `Unregister` 即可。
 
 ### 编码规范
 
