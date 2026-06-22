@@ -21,7 +21,7 @@ using System.IO;
 using System.Reflection;
 using Tecnomatix.Engineering;
 
-namespace MyPlugin.OpenResourceFolder
+namespace TxTools.OpenResourceFolder
 {
     public class OpenResourceFolderCmd : TxButtonCommand
     {
