@@ -1,131 +1,324 @@
 # LineToSolid — Process Simulate 2402 插件
 
-以场景中已有的曲线特征（**TxPolylineFeature / TxLineFeature / TxArcFeature**）为基线，按用户指定的截面参数（矩形宽×高 / 圆形直径）为每个直线段生成一个独立的长方体或圆柱体。几何体的长度方向自动与所在段方向对齐。
+以场景中已有的曲线特征（**多段线 / 直线 / 圆弧**）为基线，按用户指定的截面参数（矩形宽×高 / 圆形直径）为每个直线段生成一个相应的几何体。
 
 ## 功能特性
 
-- **多特征并列独立处理**：可一次添加多个曲线特征（包括独立的圈圈、线段、折线、圆弧），每个特征按自己的内部顺序产生段，**不做跨特征拼接**
-- 自动识别 3 种特征类型：
-  - **Polyline**：按节点拆为多段
-  - **Line**：1 段
-  - **Arc**：按"最大弦高"自适应细分为多段直线段（弦高越小，越接近真圆弧）
-- 截面：**矩形（宽×高）** 或 **圆形（直径）**
-- **长度方向 = 段方向**（无需用户选择，几何体局部 Z 轴对齐段方向）
-- 每段一个独立零件，中心 = 段中点
-- 整批生成包裹在 UndoScope 中，支持 Ctrl+Z 撤销
+- **多特征并列独立处理**：可一次添加多个曲线特征（包括独立的线段、折线、圆弧），每个特征按自己的内部顺序产生段，**不做跨特征拼接**
+- **自动识别特征类型**：
+  - **多段线**（TxPolyline）：按节点拆为多个直线段
+  - **直线**（TxLine）：1 段
+  - **圆弧/曲线**：按"最大弦高"自适应细分为多段直线段
+- **两种截面形状**：
+  - **矩形**：指定宽 × 高，支持局部 X/Y 偏移
+  - **圆柱**：指定直径，支持：
+    - 单根或多根圆柱并列（对称中线 / 起点偏移）
+    - 拐角过渡（单根用球体、多根用同心圆环）
+    - 拐弯半径自动计算或手动设置
+- **长度方向 = 段方向**（几何体局部 Z 轴对齐段方向）
+- **每段生成一个独立 Resource**，中心对齐段起点或中点
+- **整批生成包裹在 UndoScope 中**，支持 Ctrl+Z 撤销
 
 ## 文件结构
 
 ```
 LineToSolid/
-├── LineToSolidCommand.cs   入口命令（TxButtonCommand）
-├── LineToSolidForm.cs      主窗体（TxForm + TxToolStrip + 卡片 + 日志）
-├── PolylineReader.cs       多特征识别 + 段提取 + 圆弧离散
-├── GeometryBuilder.cs      几何体创建与姿态对齐
+├── LineToSolidCommand.cs       入口命令（TxButtonCommand 派生）
+├── LineToSolidForm.cs          主窗体（TxForm）
+│   ├── 工具条：刷新段信息、折叠日志
+│   ├── 左列：特征列表网格 + 共享采样参数（曲线弦高）+ 段统计
+│   ├── 右列：截面参数卡
+│   │   ├── TabControl（矩形 / 圆柱 选项卡切换）
+│   │   └── 生成按钮（文案随选项卡切换）
+│   └── 日志面板（可折叠）
+├── PolylineReader.cs           多特征识别 + 段提取 + 曲线参数化采样
+├── GeometryBuilder.cs          几何体创建、姿态对齐、拐角过渡填充
 └── README.md
 ```
 
 ## 使用流程
 
-1. 在 PS 中选中一个或多个曲线特征（Polyline / Line / Arc 都行）
-2. 菜单 → TxTools → LineToSolid，打开窗体
-3. 工具条点 **[从选择添加]**，特征会进入列表
-4. 可以反复选中其他特征 → **[从选择添加]** 累加；点 **[清空列表]** 清空
-5. 在"截面参数"卡片中：
-   - 选择截面类型（矩形 / 圆形）
-   - 输入尺寸（mm）
-   - 如果列表里有圆弧，调整"圆弧最大弦高（mm）"控制细分密度（默认 0.5）
-6. 点 **[生成几何体]**
-7. 不满意可 **[撤销上次]** 或 Ctrl+Z
+### 基本步骤
 
-## 圆弧细分原理
+1. **在 PS 中选中曲线特征**（多段线 / 直线 / 圆弧 等）
 
-设圆弧半径为 r，最大允许弦高为 s（用户输入），则每段所张的圆心角为：
+2. **打开插件窗体**：菜单 → TxTools → LineToSolid
 
-```
-θ = 2 · arccos(1 - s/r)
-```
+3. **添加特征**
+   - 在场景中用 PS 标准拾取方式选择特征
+   - 特征会自动进入左侧列表网格（需要先将焦点给网格，首次鼠标点击网格才激活拾取）
+   - 或使用工具条 **[刷新段信息]** 按钮手动更新
 
-总扫掠角 / θ 向上取整得到段数 n，然后在圆弧平面内等分插值生成 n+1 个点、n 个直线段。
+4. **调整共享参数**
+   - **曲线弦高（mm）**：控制曲线（尤其圆弧）的离散采样精度
+     - 默认 0.5，越小越精细
+     - 对矩形和圆柱都生效
 
-平面基底构造：
-- 法线 normal 优先用特征自带的 Normal/Axis；缺失时用 `cross(start-center, end-center)` 推断
-- 平面内基底：`e1 = normalize(start - center)`，`e2 = normalize(cross(normal, e1))`
-- 圆弧上点：`p(t) = center + r·cos(sweep·t)·e1 + r·sin(sweep·t)·e2`，t ∈ [0, 1]
+5. **选择截面类型**
+   - 点击右侧选项卡：**矩形截面** 或 **圆柱截面**
+   - 填入对应参数（见下文）
+   - 生成按钮文案会自动切换
 
-## 姿态对齐原理
+6. **生成几何体**
+   - 点 **[生成矩形几何体]** 或 **[生成圆柱几何体]**
+   - 进度和结果显示在底部日志面板
 
-对每个段 `seg`：
-- 段方向 `dir = normalize(End - Start)` → 作为局部 Z 轴
-- 取辅助轴 `aux`：当 `|dir · worldZ| > 0.99` 时用 `worldX`，否则用 `worldZ`
-- 局部 X = `normalize(aux × dir)`，局部 Y = `normalize(dir × localX)`
-- 平移 = 段中点
-- 组装 4×4 齐次矩阵 → 构造 `TxTransformation` → 赋给几何体 `AbsoluteLocation`
+7. **撤销或调整**
+   - 不满意可 Ctrl+Z 撤销，或点工具条 **[刷新段信息]** 重新更新
 
-矩形/圆形截面对绕长度轴的旋转不敏感（圆完全对称，矩形 180° 周期），所以 X/Y 的具体朝向不需要参数化。
+### 矩形截面参数
 
-## 编译配置
+| 参数 | 说明 |
+|------|------|
+| 宽（mm） | 矩形在局部 X 方向的尺寸 |
+| 高（mm） | 矩形在局部 Y 方向的尺寸 |
+| 局部 X 偏移 | 将矩形中心沿段方向的"侧向"（与段垂直、近水平方向）平移 |
+| 局部 Y 偏移 | 将矩形中心沿段方向的"上向"（与段和X都垂直方向）平移 |
+| 底面贴地 | 勾选后，Y 偏移自动设为 高/2，使矩形底面贴合 XZ 平面 |
+| Resource 前缀 | 生成的 Resource 名字的前缀（默认 `LTS_Rect`） |
 
-- 目标框架：与 PS 2402 SDK 匹配（通常 .NET Framework 4.7.2 / 4.8）
-- 引用程序集：
+### 圆柱截面参数
+
+| 参数 | 说明 |
+|------|------|
+| 直径（mm） | 单个圆柱的直径 |
+| 圆柱根数 | 并列圆柱的数量（1 = 单根） |
+| 圆柱间距（mm） | 相邻圆柱中心的距离（仅当根数 > 1 时可编辑） |
+| 排列方式 | 仅当根数 > 1 时可编辑：<br/>• 对称中线：多根圆柱沿 spacing 方向对称分布<br/>• 起点偏移：多根圆柱从段起点向外依次偏移 |
+| 局部 X 偏移 | 将所有圆柱群的中心沿段方向的"侧向"平移 |
+| 局部 Y 偏移 | 将所有圆柱群的中心沿段方向的"上向"平移 |
+| 底面贴地 | 勾选后，Y 偏移自动设为 直径/2 |
+| 拐角过渡 | 勾选后，在相邻段的拐角处填充过渡体：<br/>• 单根管（根数≤1）：用球体<br/>• 多根管：用同心圆环群（后续自动核减） |
+| 拐弯半径（mm） | 仅当勾选"拐角过渡"时可编辑<br/>• 0（默认）：自动计算，避免内侧管重叠<br/>• 手动值：≥ 最大侧向偏移量 |
+| Resource 前缀 | 生成的 Resource 名字的前缀（默认 `LTS_Cyl`） |
+
+## 技术细节
+
+### 坐标系构建与偏移
+
+对每个段 `seg`（Start 点、End 点、Direction）：
+
+1. **构造局部坐标系**（段方向的正交平面）
+   - 段方向 → 全局 Z 轴
+   - 取辅助向量 `aux`：
+     - 若 `|dir · worldZ| > 0.99`（接近竖直）→ 用 `worldX`
+     - 否则 → 用 `worldZ`
+   - 局部 X = `normalize(aux × dir)`（侧向，近水平）
+   - 局部 Y = `normalize(dir × localX)`（上向）
+
+2. **应用用户偏移**
+   ```
+   offsetPoint = basePoint + localX × offsetX + localY × offsetY
+   ```
+
+3. **矩形/圆形截面的方向无关性**
+   - 矩形 180° 旋转对称，所以 X/Y 朝向无需参数化
+   - 圆形完全对称
+   - 只需确保长度方向对齐段方向即可
+
+### 多根圆柱的拐角过渡原理
+
+**问题**：多根平行圆柱在拐角处会出现缝隙。解决方案是用同心圆环群填补。
+
+**核心约束**（用户硬需求）：所有平行的多根管的 **长度必须相同**。
+
+**推导**：
+1. 每根管的侧向偏移量为 `s_i`（沿 spacingAxis 方向）
+   - 对称中线：`s_i = (i - (N-1)/2) × spacing`
+   - 起点偏移：`s_i = i × spacing`
+
+2. 拐弯处的圆心应满足：当前段缩短后的管端 = 下一段缩短后的管端
+
+3. 设中心管（s=0）的缩短长度为 `T₀`，则：
+   ```
+   T₀ = R_main × tan(θ/2)
+   ```
+   其中 `R_main` 是拐弯半径（多根管"中心管"的曲率半径）
+
+4. **所有管统一缩短 T₀**（与 s_i 无关），环的大半径则通过 spacing 偏移天然形成：
+   ```
+   R_i = R_main - s_i
+   ```
+   内侧管（s_i > 0）：R_i 变小  
+   外侧管（s_i < 0）：R_i 变大
+
+5. **拐弯半径的自动计算**（避免内侧环重叠）：
+   ```
+   R_main ≥ max(|s_i|) + 2 × radius
+   ```
+   即：`R_main ≥ max_offset + 两倍管径`
+
+### 曲线离散采样（弦高法）
+
+对任意参数化曲线（TxLine / TxCurve 等），用 `GetPointByParameter(t)` 按弦高自适应细分：
+
+1. **初始粗采样**：按 MinSegmentsPerCurve（默认 8）等分参数范围
+
+2. **自适应二分细化**
+   ```
+   for each 相邻参数对 (a, b):
+       if 弦高 > MaxSagitta:
+           在中点 tm = (a+b)/2 插入新采样点
+   ```
+   重复直到所有相邻弦高都 ≤ MaxSagitta
+
+3. **弦高计算**
+   ```
+   sag = distance(curve_midpoint, chord_midpoint)
+   ```
+   其中 chord_midpoint 是 (p_a + p_b) / 2
+
+### 几何体创建工作流
+
+**不使用 EndModeling**（性能优化）：
+- PS 2402 上 `EndModeling` 会触发磁盘保存、耗时较长、且容易报错
+- 实测：不调 `EndModeling`，PS 在后续操作前自动收尾 modeling scope，生成结果无影响
+- 效率提升 **明显**
+
+**创建流程**：
+1. `comp.SetModelingScope()` → 进入建模作用域
+2. 逐段循环：
+   - 计算姿态 TxTransformation
+   - 调 `CreateSolidBox` / `CreateSolidCylinder`
+   - 若拐角过渡，加入球体或圆环及其切除盒
+3. **不调 EndModeling**
+4. 返回 comp（作为 ITxObject）
+
+## 编译与部署
+
+### 构建要求
+
+- **目标框架**：.NET Framework 4.7.2 / 4.8（与 PS 2402 SDK 匹配）
+- **引用程序集**：
   - `Tecnomatix.Engineering.dll`
   - `Tecnomatix.Engineering.Ui.dll`
   - `System.Windows.Forms`
-- 输出：DLL，放入 PS 插件目录后由 PS 加载
+  - `System.Drawing`
 
-## 编译时必看的几个 TODO
+### 部署
 
-代码遵循"未验证就不写死"的既有约定，所有不确定 API 都用反射 + try/catch 多路径回退：
+1. 编译输出 DLL
+2. 放入 PS 插件目录（通常 `...\Tecnomatix\Plant Simulation\PlugIns\`）
+3. 重启 PS，在菜单 TxTools 下出现 LineToSolid 命令
 
-### 1. 多段线顶点属性名（PolylineReader）
+### 首次编译注意事项
 
-按 `Vertices → Points → ControlPoints → GetVertices() → GetPoints()` 顺序探测。首次运行时看日志判断哪条路径生效，再固化。
+#### 1. GUID 替换（必做）
 
-### 2. 圆弧特征属性名（PolylineReader）
+`LineToSolidCommand.cs` 顶部的 `[Guid(...)]` 必须是有效的 GUID：
+```csharp
+[Guid("9A2B7F1C-3D88-4E2E-9A77-7E2B45C901AA")]
+public class LineToSolidCommand : TxButtonCommand { ... }
+```
 
-按以下候选名探测：
-- 圆心：`Center`
-- 半径：`Radius`
-- 起止：`StartPoint`/`Start`、`EndPoint`/`End`
-- 法线：`Normal`/`Axis`
-- 扫掠角：`TotalAngle`/`Angle`/`SweepAngle`
+用 Visual Studio 工具菜单 → 创建 GUID 重新生成。
 
-PS 2402 的 `TxArcFeature` 实际属性需要在 IntelliSense 中确认；首次运行看日志即可锁定。
+#### 2. API 反射与类型确认
 
-### 3. 几何体创建 API（GeometryBuilder）
+代码采用"反射 + try/catch"多路径回退策略，以兼容 PS 各版本。首次运行时：
+- 查看**日志面板**确认哪条路径生效
+- 若某条路径稳定工作，可替换为强类型调用提升性能
 
-两条主路径回退：
-- `TxApplication.ActiveDocument.PolyhedronOperations.CreateBox / CreateCylinder`
-- `TxApplication.ActiveDocument.PhysicalOperations.CreateBox / CreateCylinder`
+## UI 布局详解（v3 重构）
 
-配合数据类：
-- `TxBoxCreationData`（属性 Name / SizeX / SizeY / SizeZ）
-- `TxCylinderCreationData`（属性 Name / Radius / Height）
+### 工具条（TxToolStrip）
 
-**强烈建议**：编译第一次失败时根据 IntelliSense 锁定 PS 2402 的实际类型名与方法签名，把 `GeometryBuilder` 中 dynamic 路径替换成强类型调用，以提升性能与可读性。
+| 按钮 | 功能 |
+|------|------|
+| 刷新段信息 | 重新扫描网格中的特征，更新段统计显示 |
+| 折叠日志 | 切换底部日志面板的可见性 |
 
-### 4. UndoManager 接口
+### 左列（宽度自适应）
 
-按 `OpenScope` / `BeginScope` / `Begin` 顺序尝试。
+- **特征列表卡**
+  - TxObjGridCtrl 原生拾取控件
+  - PS 标准拾取方式：在场景中选中特征后自动进列表
+  - 支持多选删除
 
-### 5. LineToSolidCommand 的 GUID
+- **共享采样参数**
+  - 曲线弦高（mm）：单一参数，同时控制多段线、直线、圆弧的采样精度
+  - 消除了旧版本"矩形/圆柱卡各放一份参数"的歧义
 
-`LineToSolidCommand.cs` 顶部 `[Guid("...")]` 是占位字符串（且包含非法字符），**必须用 VS Tools → Create GUID 重新生成**替换。
+- **段统计行**
+  - 显示：特征数、总段数、总长度
+
+### 右列（宽度 340px 固定）
+
+- **截面参数卡**（FormUiKit.ColoredGroupBox）
+  - TabControl：两个选项卡（矩形截面 / 圆柱截面）
+  - 每个选项卡内用 TableLayoutPanel 排列参数行
+  - 参数行格式：标签（AutoSize）+ 输入框（100% 宽）
+
+- **生成按钮**（FlatColorButton）
+  - 文案随 TabControl 选项卡切换
+  - "生成矩形几何体" / "生成圆柱几何体"
+
+### 底部日志面板（高度 120px，可折叠）
+
+- RichTextBox，黑底灰字，Consolas 8pt
+- 自动时间戳前缀 `[HH:mm:ss]`
+- 垂直滚动条
+- 工具条按钮可切换展开/折叠
+
+### 参数行的 TableLayoutPanel 布局
+
+```
+┌─────────────────────────────────────────────┐
+│  标签列(AutoSize)  │  内容列(100% 宽)      │
+├────────────────────┼──────────────────────────┤
+│ "宽（mm）"         │ [NumericUpDown    ↑]     │
+├────────────────────┼──────────────────────────┤
+│ "高（mm）"         │ [NumericUpDown    ↑]     │
+├────────────────────┼──────────────────────────┤
+│ ...                │ ...                      │
+└────────────────────┴──────────────────────────┘
+```
+
+优点：
+- 标签自动宽度，对齐整洁
+- 内容框自适应剩余宽度
+- 高 DPI 下排列不乱
+
+## 状态联动
+
+圆柱选项卡内的参数可编辑性受以下规则约束：
+
+| 条件 | 不可编辑的参数 |
+|------|---|
+| 圆柱根数 ≤ 1 | 圆柱间距、排列方式 |
+| 未勾选"拐角过渡" | 拐弯半径 |
+
+切换时自动启用/禁用对应输入框。
+
+## 已知限制
+
+- ❌ 不支持跨特征拼接（如两条独立的线首尾相连）— 按设计范围"独立处理"
+- ❌ 截面恒定，不支持沿段变截面
+- ⚠️ 圆弧法线在父变换下未做严格旋转重映射；若特征本身在世界坐标系下表达则无影响
+- ⚠️ 圆弧仅支持平面圆弧；螺旋线等需扩展 PolylineReader
+
+## 后续可扩展方向
+
+- 【UI】颜色选择下拉，给生成的零件着色
+- 【参数】段过短跳过阈值暴露到 UI（当前固定 1e-6）
+- 【功能】支持变截面（沿段方向圆锥/渐变）
+- 【功能】拐角过渡自动切除（当前仅圆环+切除盒组合）
+- 【算法】非平面曲线支持（螺旋线、球面曲线等）
 
 ## 与既有 TxTools 的一致性
 
-- 卡片化 GroupBox + FlowLayout/TableLayout
-- `SystemFonts.DefaultFont` 统一字号
-- `FlatStyle.Flat` 按钮（`TxToolStrip` 默认就是 Flat）
-- 顶部 `TxToolStrip` 工具条
-- 底部可折叠日志面板
-- UndoScope 包裹整批操作，Ctrl+Z 一键回滚
+- 卡片化 GroupBox（带彩色标题栏）+ 内部 FlowLayout / TableLayout
+- 统一字体：`FormUiKit.BaseFont`
+- 按钮风格：`FlatStyle.Flat`（TxToolStrip 默认就是）
+- 布局：顶部工具条 + 中间内容 + 底部日志
+- UndoScope 包裹整批操作 → Ctrl+Z 一键回滚
+- 国际化：中文菜单 + 中文参数标签 + 中文日志
 
-## 已知限制 / 后续可扩展
+## 相关代码注释
 
-- 不支持跨特征拼接（按确认范围"独立处理"）
-- 圆弧法线在父变换下未做严格旋转重映射；若特征本身已经在世界坐标系下表达则无影响
-- 截面恒定，不支持沿段变截面
-- 圆弧只支持平面圆弧；如果是螺旋线一类的特征，需要扩展 PolylineReader
-- 后续可加"颜色选择"下拉给生成的零件着色
-- 后续可加"段过短跳过阈值"暴露到 UI（当前固定 1e-6）
+详见各源文件头部的 `/// <summary>` 标记，特别是：
+
+- `GeometryBuilder.BuildForSegments()` — 整体流程注释
+- `GeometryBuilder.ComputeInPlaneSideAxis()` — 拐角平面内轴向推导
+- `GeometryBuilder.CreateCornerTori()` — 同心圆环几何与切除盒原理
+- `PolylineReader.CollectCurvesRecursive()` — 容器递归遍历策略
