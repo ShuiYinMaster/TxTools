@@ -8,6 +8,10 @@
 //   3. [Content_Types].xml 必须包含 worksheet 的 Override 条目
 //   4. 列宽元素 <cols> 必须在 <sheetData> 之前（按 xlsx spec 顺序）
 //   5. 数字格式 numFmtId 使用内置 id（0=General, 4=0.00 小数）
+//   6. mc:Ignorable 列出的命名空间前缀必须在同一元素上声明对应的 xmlns:xxx，
+//      否则 Office OPC/MC 处理器报"文件已损坏"（WPS 宽松跳过此检查）
+//   7. worksheet 子元素须按 ECMA-376 §18.3.1.99 顺序：
+//      dimension → sheetViews → sheetFormatPr → cols → sheetData
 //
 // 坐标转换：绝对坐标 → Inverse(refMatrix) × absTx
 // 欧拉角：ZYX 顺序，单位度
@@ -119,6 +123,9 @@ namespace MyPlugin.ExportGun
         //    xl/worksheets/_rels/sheet1.xml.rels   ← Office365 必须
         //    xl/styles.xml
         //    xl/sharedStrings.xml
+        //
+        //  worksheet 子元素顺序（ECMA-376 Part1 §18.3.1.99，Office 严格校验）：
+        //    sheetPr? → dimension? → sheetViews? → sheetFormatPr? → cols? → sheetData → ...
         // ════════════════════════════════════════════════════════════
         private static void WriteXlsx(List<ExcelRow> rows, string path)
         {
@@ -148,7 +155,12 @@ namespace MyPlugin.ExportGun
                 S(r.OperationName); S(r.PointName); S(r.PointType);
             }
 
+            // 总行数（含标题行）
+            int totalRows = rows.Count + 1;
+
             // ── sheet1.xml ───────────────────────────────────────────
+            // 严格按照 ECMA-376 规定的子元素顺序：
+            //   dimension → sheetViews → sheetFormatPr → cols → sheetData
             StringBuilder sb = new StringBuilder(rows.Count * 200 + 2000);
             sb.Append("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>");
             sb.Append("<worksheet");
@@ -158,13 +170,25 @@ namespace MyPlugin.ExportGun
             sb.Append(" xmlns:x14ac=\"http://schemas.microsoft.com/office/spreadsheetml/2009/9/ac\"");
             sb.Append(" mc:Ignorable=\"x14ac\">");
 
-            // cols 必须在 sheetData 之前（xlsx 规范顺序）
+            // 1. dimension：描述数据范围（Office 期望此元素存在）
+            sb.Append("<dimension ref=\"A1:I" + totalRows + "\"/>");
+
+            // 2. sheetViews：Office 严格模式必须存在，tabSelected="1" 表示激活此Sheet
+            sb.Append("<sheetViews>");
+            sb.Append("<sheetView tabSelected=\"1\" workbookViewId=\"0\"/>");
+            sb.Append("</sheetViews>");
+
+            // 3. sheetFormatPr：默认行高声明，Office 建议存在
+            sb.Append("<sheetFormatPr defaultRowHeight=\"15\" x14ac:dyDescent=\"0.25\"/>");
+
+            // 4. cols：必须在 sheetData 之前（xlsx 规范顺序）
             sb.Append("<cols>");
             sb.Append("<col min=\"1\" max=\"2\" width=\"24\" bestFit=\"1\" customWidth=\"1\"/>");
             sb.Append("<col min=\"3\" max=\"3\" width=\"12\" bestFit=\"1\" customWidth=\"1\"/>");
             sb.Append("<col min=\"4\" max=\"9\" width=\"14\" bestFit=\"1\" customWidth=\"1\"/>");
             sb.Append("</cols>");
 
+            // 5. sheetData
             sb.Append("<sheetData>");
 
             // 标题行（style 1 = 粗体）
@@ -291,17 +315,16 @@ namespace MyPlugin.ExportGun
 
         private static string Workbook()
         {
+            // mc:Ignorable 列出的每个前缀必须在同一元素上有对应的 xmlns: 声明，
+            // 否则 Office（严格模式）报 "文件已损坏"。
+            // 修复方案：去掉所有未声明的前缀，只保留已声明的 mc（或直接去掉整个 mc:Ignorable）。
+            // fileVersion/workbookPr/calcPr 中的属性同理，只保留 Office 能接受的最小集。
             return "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
                  + "<workbook xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\""
-                 +   " xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\""
-                 +   " xmlns:mc=\"http://schemas.openxmlformats.org/markup-compatibility/2006\""
-                 +   " mc:Ignorable=\"x15 xr xr6 xr10 xr2\">"
-                 + "<fileVersion appName=\"xl\" lastEdited=\"7\" lowestEdited=\"7\"/>"
-                 + "<workbookPr defaultThemeVersion=\"166925\"/>"
+                 +   " xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\">"
                  + "<sheets>"
                  +   "<sheet name=\"焊点数据\" sheetId=\"1\" r:id=\"rId1\"/>"
                  + "</sheets>"
-                 + "<calcPr calcId=\"181029\"/>"
                  + "</workbook>";
         }
 
@@ -356,8 +379,8 @@ namespace MyPlugin.ExportGun
                  +   "<xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\"/>"
                  + "</cellStyleXfs>"
                  + "<cellXfs count=\"3\">"
-                 +   "<xf numFmtId=\"0\"   fontId=\"0\" fillId=\"0\" borderId=\"0\" xfId=\"0\"/>"
-                 +   "<xf numFmtId=\"0\"   fontId=\"1\" fillId=\"0\" borderId=\"0\" xfId=\"0\" applyFont=\"1\"/>"
+                 +   "<xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\" xfId=\"0\"/>"
+                 +   "<xf numFmtId=\"0\" fontId=\"1\" fillId=\"0\" borderId=\"0\" xfId=\"0\" applyFont=\"1\"/>"
                  +   "<xf numFmtId=\"164\" fontId=\"0\" fillId=\"0\" borderId=\"0\" xfId=\"0\" applyNumberFormat=\"1\"/>"
                  + "</cellXfs>"
                  + "<cellStyles count=\"1\">"
