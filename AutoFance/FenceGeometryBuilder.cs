@@ -170,7 +170,7 @@ namespace TxTools.FenceBuilder
             }
             finally
             {
-                // LineToSolid 既有经验: EndModeling 会抛 "External component has thrown an exception"
+                // TxTools.LineToSolid 既有经验: EndModeling 会抛 "External component has thrown an exception"
                 // 并阻塞数秒,但 PS 实际上会自动收尾 scope。完全省略 EndModeling 调用以提速。
                 // 使用当前建模资源时也不调,避免打断用户的建模会话。
                 // (如果将来发现省略 EndModeling 导致几何不持久化,再恢复)
@@ -562,7 +562,7 @@ namespace TxTools.FenceBuilder
         //   - 在 X/Y 截面(垂直 zDir 的两个轴): 关于 absLoc 对称(各占 edgeX/2 / edgeY/2)
         //   - PS 自选 X/Y 朝向, 不可控
         //
-        // 沿用 LineToSolid 已验证的策略: 仅用单参 TxTransformation(point, zDir)。
+        // 沿用 TxTools.LineToSolid 已验证的策略: 仅用单参 TxTransformation(point, zDir)。
         // 为规避 X/Y 朝向不可控:
         //   - 所有方管和立柱采用正方形截面(W=H), X/Y 朝向无视觉差
         //   - 薄板 zDir=nrm, X/Y 都是大尺寸(innerW×innerH), X/Y 朝向也无视觉差

@@ -5,7 +5,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 
-namespace MyPlugin.ExportGun
+namespace TxTools.ExportGun
 {
     public class ExportService : IDisposable
     {

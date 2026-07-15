@@ -6,7 +6,7 @@ using Tecnomatix.Engineering;
 using Tecnomatix.Engineering.Ui;
 using TxTools.Common;
 
-namespace LineToSolid
+namespace TxTools.LineToSolid
 {
     /// <summary>
     /// 线生成实体 — 从 3D 曲线特征生成矩形截面或圆柱截面的几何体。
@@ -79,7 +79,7 @@ namespace LineToSolid
         public LineToSolidForm()
         {
             SemiModal = false;
-            FormUiKit.InitStandardForm(this, "线生成实体 - LineToSolid",
+            FormUiKit.InitStandardForm(this, "线生成实体 - TxTools.LineToSolid",
                 _designSize, new Size(620, 500));
             this.Padding = new Padding(4);
 

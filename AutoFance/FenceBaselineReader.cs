@@ -48,7 +48,7 @@ namespace TxTools.FenceBuilder
     }
 
     /// <summary>
-    /// 基线读取器,参考 LineToSolid 的 PolylineReader 策略:
+    /// 基线读取器,参考 TxTools.LineToSolid 的 PolylineReader 策略:
     ///   - TxPolyline 强类型: GetVertices() → TxParameterizedPoint[]
     ///   - 其他曲线(TxLine/TxCurve/...): 反射调 GetPointByParameter(double)
     ///   - 容器对象(Resource/Part/Compound): 自动递归遍历后代挑曲线
@@ -126,7 +126,7 @@ namespace TxTools.FenceBuilder
         }
 
         /// <summary>
-        /// 沿用 LineToSolid 同款判定:
+        /// 沿用 TxTools.LineToSolid 同款判定:
         ///   - TxPolyline → Polyline
         ///   - 有 GetPointByParameter(double) → OtherCurve
         ///   - 有 StartPoint/EndPoint 属性对 → OtherCurve
@@ -165,7 +165,7 @@ namespace TxTools.FenceBuilder
         /// <summary>
         /// 把种子列表展开为全部曲线特征。
         /// 种子本身是曲线 → 直接加入;否则当容器递归遍历后代收集曲线。
-        /// 沿用 LineToSolid PolylineReader.GetSelectedCurveFeatures 的逻辑。
+        /// 沿用 TxTools.LineToSolid PolylineReader.GetSelectedCurveFeatures 的逻辑。
         /// </summary>
         public static List<ITxObject> ExpandToCurveFeatures(
             IEnumerable<ITxObject> seeds, Action<string> log)
@@ -197,7 +197,7 @@ namespace TxTools.FenceBuilder
 
         /// <summary>
         /// 递归遍历容器,收集所有曲线后代。
-        /// 4 路径(沿用 LineToSolid):
+        /// 4 路径(沿用 TxTools.LineToSolid):
         ///   1) GetAllDescendants(null) 一次性深度遍历
         ///   2) GetDirectDescendants(null) + 手动递归
         ///   3) Components/Children/SubObjects/Items/Members 属性
@@ -504,7 +504,7 @@ namespace TxTools.FenceBuilder
 
         /// <summary>
         /// 在对象上找指定名字、单参引用类型的方法,传 null 调用,返回 IEnumerable。
-        /// 沿用 LineToSolid 同款实现。
+        /// 沿用 TxTools.LineToSolid 同款实现。
         /// </summary>
         private static System.Collections.IEnumerable TryInvokeWithNullArg(object container, string methodName)
         {

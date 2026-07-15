@@ -4,10 +4,10 @@ using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using Tecnomatix.Engineering;
 
-namespace LineToSolid
+namespace TxTools.LineToSolid
 {
     /// <summary>
-    /// LineToSolid 插件入口命令。
+    /// TxTools.LineToSolid 插件入口命令。
     /// 由 PS 通过 TxButtonCommand 加载，菜单点击时弹出窗体。
     /// </summary>
     [Guid("9A2B7F1C-3D88-4E2E-9A77-7E2B45C901AA")]
@@ -17,17 +17,17 @@ namespace LineToSolid
         {
             get { return "TxTools"; }
         }
-
-        // TxButtonCommand 实际抽象成员是 Name 而不是 DisplayName
         public override string Name
         {
-            get { return "LineToSolid"; }
+            get { return ".创建线槽、水管"; }
         }
 
         public override string Description
         {
             get { return "以多段线/直线/圆弧特征为基线创建长方体/圆柱体"; }
         }
+
+        public override string LargeBitmap { get { return "image.linetosoild.png"; } }
 
         public override void Execute(object cmdParams)
         {
@@ -49,8 +49,8 @@ namespace LineToSolid
             }
             catch (Exception ex)
             {
-                MessageBox.Show("LineToSolid 启动失败：" + ex.Message,
-                    "LineToSolid", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show("TxTools.LineToSolid 启动失败：" + ex.Message,
+                    "TxTools.LineToSolid", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 

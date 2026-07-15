@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Reflection;
 using Tecnomatix.Engineering;
 
-namespace LineToSolid
+namespace TxTools.LineToSolid
 {
     /// <summary>
     /// 一个线段（直线段）的几何信息，世界坐标系。

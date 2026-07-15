@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using Tecnomatix.Engineering;
 using Tecnomatix.Engineering.DataTypes;
 
-namespace LineToSolid
+namespace TxTools.LineToSolid
 {
     public enum CrossSectionType
     {

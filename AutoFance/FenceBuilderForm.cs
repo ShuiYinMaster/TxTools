@@ -7,7 +7,7 @@ using System.Windows.Forms;
 using Tecnomatix.Engineering;
 using Tecnomatix.Engineering.Ui;
 using TxTools.Common;
-using LineToSolid;
+using TxTools.LineToSolid;
 
 namespace TxTools.FenceBuilder
 {
@@ -509,12 +509,12 @@ namespace TxTools.FenceBuilder
                     return;
                 }
 
-                // 用 LineToSolid 同款 PolylineReader 展开曲线（替代原 FenceBaselineReader）
+                // 用 TxTools.LineToSolid 同款 PolylineReader 展开曲线（替代原 FenceBaselineReader）
                 var features = new List<ITxObject>();
                 foreach (ITxObject obj in sel)
                 {
                     if (obj == null) continue;
-                    if (PolylineReader.ClassifyFeature(obj) != LineToSolid.FeatureKind.Unknown)
+                    if (PolylineReader.ClassifyFeature(obj) != TxTools.LineToSolid.FeatureKind.Unknown)
                     {
                         if (!features.Contains(obj)) features.Add(obj);
                     }
@@ -583,7 +583,7 @@ namespace TxTools.FenceBuilder
                 var baselines = new List<ITxObject>();
                 foreach (ITxObject obj in raw)
                 {
-                    if (PolylineReader.ClassifyFeature(obj) != LineToSolid.FeatureKind.Unknown)
+                    if (PolylineReader.ClassifyFeature(obj) != TxTools.LineToSolid.FeatureKind.Unknown)
                         baselines.Add(obj);
                     else
                         PolylineReader.CollectCurvesRecursive(obj, baselines);

@@ -13,7 +13,7 @@ using System;
 using System.Threading;
 using Tecnomatix.Engineering;
 
-namespace MyPlugin.ExportGun
+namespace TxTools.ExportGun
 {
     public class ExportGunCmd : TxButtonCommand
     {
@@ -21,7 +21,7 @@ namespace MyPlugin.ExportGun
         public override string Category { get { return "My Plugins"; } }
         public override string Tooltip { get { return "导出插枪和点云到 Catia"; } }
         public override string Description { get { return "将插枪及焊点云数据导出到 Catia"; } }
-        public override string Bitmap { get { return "MyPlugin.Resources.ExportGunIcon.png"; } }
+        public override string Bitmap { get { return "TxTools.Resources.ExportGunIcon.png"; } }
         public override string LargeBitmap { get { return "image.ExportGun.png"; } }
         public override void Execute(object cmdParams)
         {
