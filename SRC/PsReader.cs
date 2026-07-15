@@ -18,7 +18,7 @@ using System.Drawing;
 using System.IO;
 using Tecnomatix.Engineering;
 
-namespace MyPlugin.ExportGun
+namespace TxTools.ExportGun
 {
     public enum PointType { WeldPoint, PathPoint, ContinuousPoint, All }
 
@@ -2269,7 +2269,7 @@ namespace MyPlugin.ExportGun
         // ─── 以下代码追加到 PsReader 类内部（紧接 Section 7 之后，类的 } 之前）───────
 
         // ════════════════════════════════════════════════════════════════════
-        //  8. 焊点标注截图  —  WeldAnnotator 专用
+        //  8. 焊点标注截图  —  TxTools.WeldAnnotator 专用
         // ════════════════════════════════════════════════════════════════════
 
         // ── 8.0  数据模型 ─────────────────────────────────────────────────────
@@ -2609,7 +2609,7 @@ namespace MyPlugin.ExportGun
         // =============================================================================
 
         // ════════════════════════════════════════════════════════════════════
-        //  9. 显示状态快照  —  WeldAnnotator 专用
+        //  9. 显示状态快照  —  TxTools.WeldAnnotator 专用
         // ════════════════════════════════════════════════════════════════════
 
         // ── 9.1  拍摄快照：记录所有 ITxDisplayableObject 的当前 Visibility 状态 ──

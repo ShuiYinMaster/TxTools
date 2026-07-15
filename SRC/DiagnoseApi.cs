@@ -11,7 +11,7 @@ using System.Collections;
 using System.Reflection;
 using Tecnomatix.Engineering;
 
-namespace MyPlugin.ExportGun
+namespace TxTools.ExportGun
 {
     public static class DiagnoseApi
     {

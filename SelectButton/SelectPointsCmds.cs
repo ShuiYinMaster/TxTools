@@ -15,6 +15,28 @@
 //      - 连续点：Continuous/Seam 容器 → 不选中容器本身，展开仅取 SeamLocation 子操作
 //                （如 TxRoboticSeamLocationOperation, TxSeamLocationOperation 等）
 //   5. 用 TxSelection.SetItems 设置选区
+//
+// v5.1 变更（vs v5）:
+//   ① 连续点选取：不再选中 Continuous/Seam 容器本身
+//      → 改为展开容器，选中其内部子操作（下一层级）
+//      → Continuous/Seam 容器是 ITxObjectCollection，可调用 GetAllDescendants
+//      → 子操作类型多样（SeamLocation, Location 等），全部选中
+//   ② IsTargetPoint(Continuous) 不再匹配 Continuous/Seam 容器
+//      → 由 CollectTargets 特殊处理逻辑接管
+//   ③ 新增 DrillContinuousContainer() 方法：展开容器仅取 SeamLocation 子操作
+//
+// v5 变更（vs v4）:
+//   ① 废弃 GetEnumerator 手动递归 → 改用 GetAllDescendants(TxNoTypeFilter)
+//      （ITxObjectCollection 的官方遍历方法，更可靠）
+//   ② 废弃 SimulatedObjects 策略（返回模拟对象如机器人/焊枪，不含点位）
+//   ③ 焊点提取改用强类型 TxWeldLocationOperation.WeldPoint（已确认 API）
+//      + dynamic WeldPoint 兜底（TxRoboticSeamLocationOperation 等子类）
+//   ④ 焊点目标 = 操作本身（TxWeldLocationOperation，ITxDisplayableObject，可选中）
+//      过渡点/连续点目标 = 操作本身（无独立点位对象）
+//      ※ ITxWeldPoint : ITxObject 不继承 ITxDisplayableObject，SetItems 无法选中
+//   ⑤ 新增 GetPlanningItems() 兜底取操作选中
+
+using C1.Util.DX.Direct2D;
 using System;
 using System.Collections.Generic;
 using Tecnomatix.Engineering;
@@ -30,6 +52,8 @@ namespace TxTools.SelectPoints
     {
         public override string Name => ".选中所有焊点";
         public override string Category => "TxTools";
+        public override string Description => "选中所有焊点";
+        public override string Bitmap => "image.weldpoint.bmp";
         public override void Execute(object cmdParams)
         {
             SelectPointsCore.Run(PointKind.Weld, "焊点");
@@ -40,6 +64,8 @@ namespace TxTools.SelectPoints
     {
         public override string Name => ".选中所有过渡点";
         public override string Category => "TxTools";
+        public override string Description => "选中所有过渡点";
+        public override string Bitmap => "image.via.bmp";
         public override void Execute(object cmdParams)
         {
             SelectPointsCore.Run(PointKind.Path, "过渡点");
@@ -50,6 +76,8 @@ namespace TxTools.SelectPoints
     {
         public override string Name => ".选中所有连续点";
         public override string Category => "TxTools";
+        public override string Description => "选中所有连续点";
+        public override string Bitmap => "image.seam.bmp";
         public override void Execute(object cmdParams)
         {
             SelectPointsCore.Run(PointKind.Continuous, "连续点");

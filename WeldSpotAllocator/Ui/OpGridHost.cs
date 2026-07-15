@@ -8,7 +8,7 @@ using System.Windows.Forms;
 using Tecnomatix.Engineering;
 using Tecnomatix.Engineering.Ui;
 
-namespace MyPlugin.WeldSpotAllocator
+namespace TxTools.WeldSpotAllocator
 {
     public sealed class OpGridHost
     {

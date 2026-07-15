@@ -21,24 +21,37 @@
 // 8. ExportToCurrentDoc=true 且活动文档已是 Part 时，若用户填了自定义零件名，
 //    现在会应用到当前 Part 上（仅 set_Name，不动 PartNumber），与其它分支一致。
 
+using HybridShapeTypeLib;
+using INFITF;
+using MECMOD;
+using ProductStructureTypeLib;
 using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
-using INFITF;
-using MECMOD;
-using HybridShapeTypeLib;
-using ProductStructureTypeLib;
+using System.Windows.Forms.DataVisualization.Charting;
 using Tecnomatix.Engineering;
-
+using SysDir = System.IO.Directory;
 using SysFile = System.IO.File;
 using SysPath = System.IO.Path;
-using SysDir = System.IO.Directory;
 
-namespace MyPlugin.ExportGun
+namespace TxTools.ExportGun
 {
     public enum ExportFormat { Xml3d, CATProduct }
     public enum BallExportOption { TrajectoryAndBall, TrajectoryOnly, BallOnly }
+
+    /// <summary>
+    /// 焊枪导出模式（体积 vs 命名的权衡）。
+    /// SharedGeometry：Copy+Paste 共享 CGR 几何，3DXML 只写一份几何；
+    ///                 CATIA COM 层不允许改 CGR 实例名，所有实例名保持 CGR 原名（如 FFM130-....1/.2/.3）
+    /// IndependentNaming：每个焊点复制一份独立的 CGR 副本，通过文件名让 CATIA 生成不同的 Reference；
+    ///                 实例名 = 焊点名，代价是 3DXML 体积 ≈ 焊点数 × CGR
+    /// </summary>
+    public enum GunExportMode
+    {
+        SharedGeometry,
+        IndependentNaming
+    }
 
     public class GunExportParams
     {
@@ -62,6 +75,9 @@ namespace MyPlugin.ExportGun
         //    两者都为空 → 沿用 GunInfo 中已解析的默认 TCP
         public string TcpName;
         public double[] TcpCustomMatrix;
+
+        // —— 焊枪导出模式（默认共享几何，体积最小） ——
+        public GunExportMode ExportMode;
     }
 
     public class BallExportParams
@@ -429,48 +445,225 @@ namespace MyPlugin.ExportGun
         }
 
         // ════════════════════════════════════════════════════════════
-        //  导出插枪
+        //  导出插枪（分派器）
         // ════════════════════════════════════════════════════════════
         public void ExportGuns(GunExportParams p, Action<ExportProgress> onProgress, Action<string> onLog)
         {
             if (_catia == null) throw new InvalidOperationException("CATIA 未连接");
 
+            if (p.ExportMode == GunExportMode.IndependentNaming)
+            {
+                onLog?.Invoke("[Catia] 导出模式：独立命名（每焊点独立几何，实例名=焊点名，体积随焊点数线性增长）");
+                ExportGunsIndependent(p, onProgress, onLog);
+            }
+            else
+            {
+                onLog?.Invoke("[Catia] 导出模式：共享几何（Copy+Paste 实例复用，体积最小；实例名保持 CGR 原名）");
+                ExportGunsShared(p, onProgress, onLog);
+            }
+        }
+
+        // ════════════════════════════════════════════════════════════
+        //  模式 A：共享几何（体积最小，实例名保持 CGR 原名）
+        // ════════════════════════════════════════════════════════════
+        private void ExportGunsShared(GunExportParams p, Action<ExportProgress> onProgress, Action<string> onLog)
+        {
+            // 保存并关闭弹窗 / 刷新
+            bool savedDisplayAlerts = true;
+            bool savedRefreshDisplay = true;
+            try { savedDisplayAlerts = (bool)((dynamic)_catia).DisplayFileAlerts; ((dynamic)_catia).DisplayFileAlerts = false; } catch { }
+            try { savedRefreshDisplay = (bool)((dynamic)_catia).RefreshDisplay; ((dynamic)_catia).RefreshDisplay = false; } catch { }
+
             INFITF.Window initialWindow = null;
             try { initialWindow = _catia.ActiveWindow; } catch { }
 
-            ProductDocument productDoc = null;
-            string baseName = "ExportedGuns";
             try
             {
-                if (_catia.ActiveDocument is ProductDocument pd)
+                // 1. Product 文档：优先复用活动 Product，否则新建
+                ProductDocument productDoc;
+                if (_catia.ActiveDocument is ProductDocument existingPd)
                 {
-                    productDoc = pd;
-                    string raw = null;
-                    try { raw = pd.Product.get_Name(); } catch { }
-                    if (string.IsNullOrEmpty(raw)) try { raw = pd.Product.get_PartNumber(); } catch { }
-                    if (string.IsNullOrEmpty(raw)) raw = SysPath.GetFileNameWithoutExtension(pd.get_Name());
-                    raw = Regex.Replace(raw, @"-?\d{6,}GUN.*$", "", RegexOptions.IgnoreCase);
-                    raw = Regex.Replace(raw, @"-?GUN\d{8}.*$", "", RegexOptions.IgnoreCase);
-                    baseName = string.IsNullOrEmpty(raw) ? SysPath.GetFileNameWithoutExtension(pd.get_Name()) : raw;
-                    onLog($"[Catia] 活动文档：{pd.get_Name()}，根产品：{baseName}");
+                    productDoc = existingPd;
+                    onLog?.Invoke("[Catia] 使用当前 Product 文档");
                 }
+                else
+                {
+                    productDoc = (ProductDocument)_catia.Documents.Add("Product");
+                    if (!string.IsNullOrWhiteSpace(p.CustomProductName))
+                        try { productDoc.Product.set_PartNumber(p.CustomProductName.Trim()); } catch { }
+                    onLog?.Invoke("[Catia] 新建 Product 文档");
+                }
+
+                Product rootProduct = productDoc.Product;
+                Products rootProducts = rootProduct.Products;
+                Selection sel = productDoc.Selection;
+
+                // 2. 统计总数
+                int total = 0;
+                foreach (var op in p.Operations)
+                {
+                    if (op.Gun == null || op.Points == null) continue;
+                    foreach (var pt in op.Points)
+                        if (IsPointSelected(p.SelectedKeys, op.Name, pt.Name)) total++;
+                }
+                int current = 0;
+
+                // 3. Reference 复用缓存（跨 Operation）
+                var sourceCache = new Dictionary<string, Product>(StringComparer.OrdinalIgnoreCase);
+
+                // 4. 主循环
+                foreach (var op in p.Operations)
+                {
+                    var gun = op.Gun;
+                    if (gun == null || op.Points == null) continue;
+
+                    string modelPath = ResolveModelPath(p, op, gun);
+                    if (modelPath == null)
+                    {
+                        onLog?.Invoke($"  ! [{op.Name}] 未找到模型文件");
+                        continue;
+                    }
+
+                    var opPts = new List<PointInfo>();
+                    foreach (var pt in op.Points)
+                        if (IsPointSelected(p.SelectedKeys, op.Name, pt.Name)) opPts.Add(pt);
+                    if (opPts.Count == 0) continue;
+
+                    // TCP 覆盖
+                    ApplyTcpOverride(p, op, gun, onLog);
+
+                    // 容器：同名冲突自动加后缀
+                    string containerName = GetUniqueChildName(rootProducts, op.Name);
+                    Product container = rootProducts.AddNewComponent("Product", containerName);
+                    try { container.set_Name(containerName); } catch { }
+                    try { container.set_PartNumber(containerName); } catch { }
+                    Products targetProducts = container.Products;
+
+                    // 准备源实例
+                    Product sourceInst;
+                    int startIdx = 0;
+
+                    if (!sourceCache.TryGetValue(modelPath, out sourceInst))
+                    {
+                        try
+                        {
+                            targetProducts.AddComponentsFromFiles(new object[] { modelPath }, "All");
+                        }
+                        catch (Exception ex)
+                        {
+                            onLog?.Invoke($"    x [{op.Name}] 加载 CGR 失败: {ex.Message}");
+                            continue;
+                        }
+
+                        sourceInst = targetProducts.Item(targetProducts.Count);
+                        sourceCache[modelPath] = sourceInst;
+
+                        // 首焊点：源实例定位（不改名）
+                        var pt0 = opPts[0];
+                        current++;
+                        onProgress?.Invoke(new ExportProgress { Total = total, Current = current, CurrentItem = pt0.Name });
+
+                        try
+                        {
+                            double[] placed0 = ComputePlaced(p, gun, pt0);
+                            sourceInst.Position.SetComponents(ToSetComp(placed0));
+                        }
+                        catch (Exception ex)
+                        {
+                            onLog?.Invoke($"    x 首实例设置失败 [{pt0.Name}]: {ex.Message}");
+                        }
+
+                        startIdx = 1;
+                        onLog?.Invoke($"    Reference 加载: {System.IO.Path.GetFileName(modelPath)}");
+                    }
+                    else
+                    {
+                        onLog?.Invoke($"    Reference 复用: {System.IO.Path.GetFileName(modelPath)}");
+                    }
+
+                    // Copy 源
+                    try
+                    {
+                        sel.Clear();
+                        sel.Add(sourceInst);
+                        sel.Copy();
+                    }
+                    catch (Exception ex)
+                    {
+                        onLog?.Invoke($"    x [{op.Name}] Copy 源实例失败: {ex.Message}");
+                        continue;
+                    }
+
+                    // Paste 剩余焊点：每次 Paste 后立即定位
+                    for (int i = startIdx; i < opPts.Count; i++)
+                    {
+                        var pt = opPts[i];
+                        current++;
+                        onProgress?.Invoke(new ExportProgress { Total = total, Current = current, CurrentItem = pt.Name });
+
+                        try
+                        {
+                            int beforeCount = targetProducts.Count;
+
+                            sel.Clear();
+                            sel.Add(container);
+                            sel.Paste();
+
+                            int afterCount = targetProducts.Count;
+                            if (afterCount <= beforeCount)
+                                throw new Exception("Paste 后实例数未增加");
+
+                            Product inst = targetProducts.Item(afterCount);
+                            double[] placed = ComputePlaced(p, gun, pt);
+                            inst.Position.SetComponents(ToSetComp(placed));
+                        }
+                        catch (Exception ex)
+                        {
+                            onLog?.Invoke($"    x 插入失败 [{pt.Name}]: {ex.Message}");
+                        }
+                    }
+
+                    onLog?.Invoke($"  [{op.Name}] 已插入 {opPts.Count} 个焊点实例（共享 Reference）");
+                }
+
+                try { rootProduct.Update(); } catch { }
+                onLog?.Invoke($"[Catia] 插枪完成（共享几何：{sourceCache.Count} 份几何，{current}/{total} 个实例）");
             }
-            catch { }
-            if (productDoc == null)
+            finally
+            {
+                try { ((dynamic)_catia).RefreshDisplay = savedRefreshDisplay; } catch { }
+                try { ((dynamic)_catia).DisplayFileAlerts = savedDisplayAlerts; } catch { }
+                if (initialWindow != null) try { initialWindow.Activate(); } catch { }
+            }
+        }
+
+        // ════════════════════════════════════════════════════════════
+        //  模式 B：独立命名（每焊点独立 CGR 副本，实例名=焊点名）
+        // ════════════════════════════════════════════════════════════
+        private void ExportGunsIndependent(GunExportParams p, Action<ExportProgress> onProgress, Action<string> onLog)
+        {
+            INFITF.Window initialWindow = null;
+            try { initialWindow = _catia.ActiveWindow; } catch { }
+
+            // 1. Product 文档：优先复用活动 Product，否则新建
+            ProductDocument productDoc;
+            if (_catia.ActiveDocument is ProductDocument existingPd)
+            {
+                productDoc = existingPd;
+                onLog?.Invoke("[Catia] 使用当前 Product 文档");
+            }
+            else
             {
                 productDoc = (ProductDocument)_catia.Documents.Add("Product");
-                productDoc.Product.set_PartNumber("ExportedGuns");
-                onLog("[Catia] 已新建 Product 文档");
+                if (!string.IsNullOrWhiteSpace(p.CustomProductName))
+                    try { productDoc.Product.set_PartNumber(p.CustomProductName.Trim()); } catch { }
+                onLog?.Invoke("[Catia] 新建 Product 文档");
             }
-            if (!string.IsNullOrWhiteSpace(p.CustomProductName)) { baseName = p.CustomProductName.Trim(); onLog($"[Catia] 使用自定义产品名称：{baseName}"); }
 
             Product rootProduct = productDoc.Product;
             Products rootProducts = rootProduct.Products;
 
-            foreach (var op in p.Operations)
-                if (op.Points == null || op.Points.Count == 0) PsReader.FillPoints(op, p.PointFilter, p.UseMfgName, onLog);
-
-            // total 仅统计「将实际插入」的点（受选中点白名单约束）
+            // 2. 统计总数
             int total = 0;
             foreach (var op in p.Operations)
             {
@@ -478,154 +671,157 @@ namespace MyPlugin.ExportGun
                 foreach (var pt in op.Points)
                     if (IsPointSelected(p.SelectedKeys, op.Name, pt.Name)) total++;
             }
+            int current = 0;
 
-            onLog($"[Catia] 参考坐标系：{(p.RefMatrix != null ? p.RefName ?? "自定义参考系" : "世界坐标系")}");
-
+            // 3. 临时目录：为每个焊点生成独立命名的 CGR 副本
             string tempDir = SysPath.Combine(SysPath.GetTempPath(), "CatiaGunExport_" + Guid.NewGuid().ToString("N"));
             SysDir.CreateDirectory(tempDir);
+
             try
             {
                 foreach (var op in p.Operations)
                 {
-                    GunInfo gun = op.Gun;
-                    if (gun == null) { onLog($"  ! [{op.Name}] 无焊枪信息，跳过"); continue; }
+                    var gun = op.Gun;
+                    if (gun == null || op.Points == null) continue;
 
-                    // ── TCP 覆盖：自定义坐标优先，否则按名称在该操作工具上解析 ──
-                    if (p.GunOriginAtTCP && (p.TcpCustomMatrix != null || !string.IsNullOrEmpty(p.TcpName)))
+                    string modelPath = ResolveModelPath(p, op, gun);
+                    if (modelPath == null)
                     {
-                        double[] tcpWorld = p.TcpCustomMatrix
-                            ?? PsReader.ResolveTcpWorldByName(op, p.TcpName, onLog);
-                        if (tcpWorld != null)
-                        {
-                            gun.TcpWorldMatrix = tcpWorld;
-                            double[] rel = ComputeTcpRelTool(gun.ToolMatrix, tcpWorld);
-                            if (rel != null) gun.TcpRelTool = rel;
-                            onLog($"    TCP 覆盖：{(p.TcpCustomMatrix != null ? "自定义坐标" : p.TcpName)}");
-                        }
-                        else onLog($"    ! 未能解析所选 TCP（{p.TcpName}），改用默认 TCP");
+                        onLog?.Invoke($"  ! [{op.Name}] 未找到模型文件");
+                        continue;
                     }
 
-                    string modelPath = null;
-                    if (p.PerOpModelPaths != null && p.PerOpModelPaths.TryGetValue(op.Name, out string perOpPath) &&
-                        !string.IsNullOrEmpty(perOpPath) && SysFile.Exists(perOpPath)) modelPath = perOpPath;
-                    else if (!string.IsNullOrEmpty(p.CustomModelPath) && SysFile.Exists(p.CustomModelPath)) modelPath = p.CustomModelPath;
-                    else if (!string.IsNullOrEmpty(gun.ModelPath) && SysFile.Exists(gun.ModelPath)) modelPath = gun.ModelPath;
-
-                    if (modelPath == null) { onLog($"  ! [{op.Name}] 未找到模型文件"); continue; }
-                    if (op.Points == null || op.Points.Count == 0) { onLog($"  ! [{op.Name}] 无焊点"); continue; }
-
-                    // 仅保留勾选的点；本 op 无勾选则整体跳过（不创建空容器）
                     var opPts = new List<PointInfo>();
                     foreach (var pt in op.Points)
                         if (IsPointSelected(p.SelectedKeys, op.Name, pt.Name)) opPts.Add(pt);
-                    if (opPts.Count == 0) { onLog($"  - [{op.Name}] 无勾选点，跳过"); continue; }
+                    if (opPts.Count == 0) continue;
 
-                    onLog($"  [{op.Name}] {opPts.Count} 个焊点，模型：{SysPath.GetFileName(modelPath)}");
+                    // TCP 覆盖
+                    ApplyTcpOverride(p, op, gun, onLog);
 
-                    string dateStr = DateTime.Now.ToString("yyyyMMdd");
-                    string containerBase = $"{baseName}-GUN-{dateStr}";
-                    var seqRegex = new Regex($@"^{Regex.Escape(containerBase)}\.(\d{{3}})$");
-                    int maxSeq = 0;
-                    for (int ci = 1; ci <= rootProducts.Count; ci++)
-                    {
-                        try { Match m = seqRegex.Match(rootProducts.Item(ci).get_Name()); if (m.Success) { int s = int.Parse(m.Groups[1].Value); if (s > maxSeq) maxSeq = s; } } catch { }
-                    }
-                    string containerName = Sanitize($"{containerBase}.{(maxSeq + 1):D3}");
-                    Product gunContainer = null;
-                    try
-                    {
-                        gunContainer = rootProducts.AddNewComponent("Product", "");
-                        gunContainer.set_Name(containerName);
-                        try { gunContainer.set_PartNumber(containerName); } catch { }
-                        onLog($"    容器：{containerName}");
-                    }
-                    catch (Exception ex) { onLog($"    x 容器创建失败：{ex.Message}"); continue; }
+                    // 容器
+                    string containerName = GetUniqueChildName(rootProducts, op.Name);
+                    Product container = rootProducts.AddNewComponent("Product", containerName);
+                    try { container.set_Name(containerName); } catch { }
+                    try { container.set_PartNumber(containerName); } catch { }
+                    Products targetProducts = container.Products;
 
-                    Products targetProducts = gunContainer.Products;
                     string modelExt = SysPath.GetExtension(modelPath);
+                    onLog?.Invoke($"  [{op.Name}] {opPts.Count} 个焊点，模型：{SysPath.GetFileName(modelPath)}");
 
-                    // TCP 公共零件
-                    Part tcpPart = null;
-                    HybridBody tcpGeomSet = null;
-                    HybridShapeFactory tcpSF = null;
-                    string tcpPartName = Sanitize(op.Name + "_TCPs");
-                    if (p.ExportTCP)
-                    {
-                        try
-                        {
-                            Product tcpProduct = targetProducts.AddNewComponent("Part", tcpPartName);
-                            tcpProduct.set_Name(tcpPartName);
-                            // 同 ExportBalls：AddNewComponent 不切换 ActiveDocument，
-                            // 必须经 ReferenceProduct.Parent 取宿主 PartDocument。
-                            PartDocument tcpPartDoc = ResolvePartDocFromComponent(tcpProduct, onLog);
-                            if (tcpPartDoc == null) tcpPartDoc = TryFindNewlyAddedPartDoc(tcpProduct, onLog);
-                            if (tcpPartDoc != null)
-                            {
-                                tcpPart = tcpPartDoc.Part;
-                                tcpSF = (HybridShapeFactory)tcpPart.HybridShapeFactory;
-                                HybridBodies bodies = tcpPart.HybridBodies;
-                                tcpGeomSet = bodies.Add();
-                                tcpGeomSet.set_Name("TCP_坐标");
-                                onLog($"    公共 TCP 零件：{tcpPartName}");
-                            }
-                            else
-                            {
-                                onLog($"    ! 无法解析 TCP 零件文档，TCP 可视化退化为 Product 占位");
-                                p.ExportTCP = false;
-                            }
-                        }
-                        catch (Exception ex) { onLog($"    ! TCP 零件创建异常：{ex.Message}"); p.ExportTCP = false; }
-                    }
-
-                    int ptIndex = 0;
                     foreach (var pt in opPts)
                     {
-                        ptIndex++;
-                        onProgress?.Invoke(new ExportProgress { Total = total, Current = ptIndex, CurrentItem = pt.Name });
-                        onLog($"    [{ptIndex}/{opPts.Count}] {pt.Name}");
+                        current++;
+                        onProgress?.Invoke(new ExportProgress { Total = total, Current = current, CurrentItem = pt.Name });
+
                         try
                         {
-                            string ptFile = SysPath.Combine(tempDir, Sanitize(pt.Name) + modelExt);
+                            // 关键：为每个焊点复制一份 CGR，用焊点名命名
+                            // CATIA 加载后 Reference 名 = 文件名 = 焊点名，实例名同步为焊点名
+                            string safeName = Sanitize(pt.Name);
+                            string ptFile = SysPath.Combine(tempDir, safeName + modelExt);
                             SysFile.Copy(modelPath, ptFile, true);
+
                             targetProducts.AddComponentsFromFiles(new object[] { ptFile }, "All");
-                            Product inserted = targetProducts.Item(targetProducts.Count);
-                            try { inserted.set_Name(Sanitize(pt.Name)); } catch { }
+                            Product inst = targetProducts.Item(targetProducts.Count);
+                            try { inst.set_Name(safeName); } catch { }
 
-                            double[] placed = p.GunOriginAtTCP
-                                ? CalcGunPlacedMatrix(pt.TCPMatrix, gun.ToolMatrix, gun.TcpWorldMatrix, gun.TcpRelTool)
-                                : pt.TCPMatrix;
-                            double[] tcpSrc = pt.TCPMatrix;
-                            if (p.RefMatrix != null && !PsReader.IsIdentity(p.RefMatrix))
-                            {
-                                placed = PsReader.ToRelative(placed, p.RefMatrix);
-                                tcpSrc = PsReader.ToRelative(tcpSrc, p.RefMatrix);
-                            }
-                            inserted.Position.SetComponents(ToSetComp(placed));
-
-                            // TCP 可视化
-                            if (p.ExportTCP)
-                            {
-                                string coordName = pt.Name + "_TCP";
-                                if (tcpPart != null && tcpGeomSet != null && tcpSF != null)
-                                    CreateAxisVisual(tcpPart, tcpGeomSet, tcpSF, tcpSrc, coordName, onLog);
-                                else
-                                    InsertMarker(targetProducts, coordName, tcpSrc);
-                            }
+                            double[] placed = ComputePlaced(p, gun, pt);
+                            inst.Position.SetComponents(ToSetComp(placed));
                         }
-                        catch (Exception ex) { onLog($"    x 插入失败：{ex.Message}"); }
+                        catch (Exception ex)
+                        {
+                            onLog?.Invoke($"    x 插入失败 [{pt.Name}]: {ex.Message}");
+                        }
                     }
-
-                    if (tcpPart != null) try { tcpPart.Update(); } catch { }
                 }
+
                 try { rootProduct.Update(); } catch { }
+                onLog?.Invoke($"[Catia] 插枪完成（独立命名：{current}/{total} 个实例，几何数=实例数）");
             }
             finally
             {
-                try { if (SysDir.Exists(tempDir)) SysDir.Delete(tempDir, true); } catch { onLog($"    ! 临时目录清理失败：{tempDir}"); }
+                try { if (SysDir.Exists(tempDir)) SysDir.Delete(tempDir, true); }
+                catch { onLog?.Invoke($"    ! 临时目录清理失败：{tempDir}"); }
                 if (initialWindow != null) try { initialWindow.Activate(); } catch { }
             }
+        }
 
-            onLog("[Catia] 插枪完成（未保存，请手动保存）");
+        // ---------- 辅助：解析模型路径（自定义 > 每 Op 覆盖 > GunInfo 默认） ----------
+        private static string ResolveModelPath(GunExportParams p, OperationInfo op, GunInfo gun)
+        {
+            if (p.PerOpModelPaths != null &&
+                p.PerOpModelPaths.TryGetValue(op.Name, out string perOpPath) &&
+                !string.IsNullOrEmpty(perOpPath) && SysFile.Exists(perOpPath))
+                return perOpPath;
+
+            if (!string.IsNullOrEmpty(p.CustomModelPath) && SysFile.Exists(p.CustomModelPath))
+                return p.CustomModelPath;
+
+            if (!string.IsNullOrEmpty(gun.ModelPath) && SysFile.Exists(gun.ModelPath))
+                return gun.ModelPath;
+
+            return null;
+        }
+
+        // ---------- 辅助：TCP 覆盖（GunOriginAtTCP=true 且指定了 TCP 时应用） ----------
+        private static void ApplyTcpOverride(GunExportParams p, OperationInfo op, GunInfo gun, Action<string> onLog)
+        {
+            if (!p.GunOriginAtTCP) return;
+            if (p.TcpCustomMatrix == null && string.IsNullOrEmpty(p.TcpName)) return;
+
+            double[] tcpWorld = p.TcpCustomMatrix ?? PsReader.ResolveTcpWorldByName(op, p.TcpName, onLog);
+            if (tcpWorld == null)
+            {
+                onLog?.Invoke($"    ! 未能解析所选 TCP（{p.TcpName}），改用默认 TCP");
+                return;
+            }
+
+            gun.TcpWorldMatrix = tcpWorld;
+            double[] rel = ComputeTcpRelTool(gun.ToolMatrix, tcpWorld);
+            if (rel != null) gun.TcpRelTool = rel;
+            onLog?.Invoke($"    TCP 覆盖：{(p.TcpCustomMatrix != null ? "自定义坐标" : p.TcpName)}");
+        }
+
+        // ---------- 辅助：容器同名冲突处理（自动加 _2 / _3 后缀） ----------
+        private static string GetUniqueChildName(Products parent, string baseName)
+        {
+            var existing = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            int cnt = 0;
+            try { cnt = parent.Count; } catch { }
+            for (int i = 1; i <= cnt; i++)
+            {
+                try
+                {
+                    Product ch = parent.Item(i);
+                    try { existing.Add(ch.get_Name()); } catch { }
+                    try { existing.Add(ch.get_PartNumber()); } catch { }
+                }
+                catch { }
+            }
+
+            if (!existing.Contains(baseName)) return baseName;
+
+            for (int i = 2; i <= 999; i++)
+            {
+                string tryName = baseName + "_" + i;
+                if (!existing.Contains(tryName)) return tryName;
+            }
+            return baseName + "_" + Guid.NewGuid().ToString("N").Substring(0, 6);
+        }
+
+
+        // ---------- 辅助：位置矩阵计算 ----------
+        private double[] ComputePlaced(GunExportParams p, dynamic gun, PointInfo pt)
+        {
+            double[] placed = p.GunOriginAtTCP
+                ? CalcGunPlacedMatrix(pt.TCPMatrix, gun.ToolMatrix, gun.TcpWorldMatrix, gun.TcpRelTool)
+                : pt.TCPMatrix;
+
+            if (p.RefMatrix != null && !PsReader.IsIdentity(p.RefMatrix))
+                placed = PsReader.ToRelative(placed, p.RefMatrix);
+
+            return placed;
         }
 
         // ════════════════════════════════════════════════════════════

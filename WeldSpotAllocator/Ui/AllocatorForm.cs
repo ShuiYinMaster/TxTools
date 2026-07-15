@@ -19,7 +19,7 @@ using TextBox = System.Windows.Forms.TextBox;
 using RadioButton = System.Windows.Forms.RadioButton;
 using Panel = System.Windows.Forms.Panel;
 
-namespace MyPlugin.WeldSpotAllocator
+namespace TxTools.WeldSpotAllocator
 {
     public class AllocatorForm : TxForm
     {
@@ -65,7 +65,18 @@ namespace MyPlugin.WeldSpotAllocator
         public AllocatorForm()
         {
             try { SemiModal = false; } catch { }
-            try { FlatStyleEnabled = false; } catch { }
+            try
+            {
+                var flatStyleProp = this.GetType().GetProperty("FlatStyleEnabled");
+                if (flatStyleProp != null && flatStyleProp.CanWrite)
+                {
+                    flatStyleProp.SetValue(this, false, null);
+                }
+            }
+            catch
+            {
+                // 反射失败时静默忽略，确保插件继续运行
+            }
             Text = "焊点分配 / 更新";
             Font = SystemFonts.MessageBoxFont;
             AutoScaleMode = AutoScaleMode.None;

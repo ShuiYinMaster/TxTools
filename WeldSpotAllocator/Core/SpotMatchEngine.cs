@@ -12,7 +12,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 
-namespace MyPlugin.WeldSpotAllocator
+namespace TxTools.WeldSpotAllocator
 {
     public sealed class NameOptions
     {

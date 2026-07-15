@@ -12,9 +12,9 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using Tecnomatix.Engineering;
-using MyPlugin.ExportGun;
+using TxTools.ExportGun;
 
-namespace MyPlugin.WeldSpotAllocator
+namespace TxTools.WeldSpotAllocator
 {
     public static class SpotReader
     {

@@ -12,13 +12,14 @@
 //
 // runtime 待验证点（首次运行看日志）：Paste 行为、GetParent、Delete、Undo 事务方法名。
 
+using TxTools.ExportGun;
 using System;
 using System.Collections;
 using System.Linq;
 using Tecnomatix.Engineering;
-using MyPlugin.ExportGun;
+using TxTools.WeldSpotAllocator;
 
-namespace MyPlugin.WeldSpotAllocator
+namespace TxTools.WeldSpotAllocator
 {
     public sealed class WriteReport
     {
@@ -92,37 +93,41 @@ namespace MyPlugin.WeldSpotAllocator
                     SetName(mapped, om.RefOp.Name + "_Mapped");
 
                     var md = SpotReader.ReadOneWeldOp(mapped, log);   // _Mapped 里参考焊点副本(占位)
-                    int n = Math.Min(om.RefOp.Spots.Count, md.Spots.Count);
+                    int n = md.Spots.Count;                           // 遍历全部占位，逐个清掉
                     for (int i = 0; i < n; i++)
                     {
-                        var refSpot = om.RefOp.Spots[i];
-                        var placeholder = md.Spots[i];                // 参考占位副本(用完即删)
-                        var match = om.Matches.FirstOrDefault(x => ReferenceEquals(x.Ref, refSpot));
-                        if (match == null) continue;                  // 该参考点无匹配 → 保留占位
+                        var placeholder = md.Spots[i];                // 参考占位副本(用完必删)
+                        var refSpot = i < om.RefOp.Spots.Count ? om.RefOp.Spots[i] : null;
+                        var match = refSpot == null ? null : om.Matches.FirstOrDefault(x => ReferenceEquals(x.Ref, refSpot));
 
                         try
                         {
-                            ITxObject tgtLoc = match.Target.LocOp ?? match.Target.Raw;  // 待分配焊点 location
-                            ITxObject anchor = placeholder.LocOp;                       // 移到占位之后
-
-                            // 2) 把待分配焊点 location 移入 _Mapped（= 树里拖动），紧跟占位之后
-                            if (!MoveLocationInto(mapped, tgtLoc, anchor, log))
-                            { Fail(rep, $"[{match.Target?.Name}] 移入 _Mapped 失败"); continue; }
-                            rep.Consumed++;
-
-                            // 3) 可选：姿态借参考（保持待分配焊点自身位置）
-                            if (plan.CopyRotation)
+                            if (match != null)
                             {
-                                var wp = match.Target.Raw as TxWeldPoint;
-                                if (wp != null) wp.AbsoluteLocation = PsReader.ArrToTxPublic(ComposeAssignMatrix(plan, match));
-                            }
-                            // 4) 可选：复制轨迹参数到移入的 location
-                            if (plan.CopyParams) CopyTrajectoryParams(refSpot.LocOp, tgtLoc, log);
+                                ITxObject tgtLoc = match.Target.LocOp ?? match.Target.Raw;  // 待分配焊点 location
+                                ITxObject anchor = placeholder.LocOp;                       // 移到占位之后
 
-                            // 5) 删参考占位副本（参考 MFG 原轨迹仍引用，不会灰）
+                                // 把待分配焊点 location 移入 _Mapped（= 树里拖动），紧跟占位之后
+                                if (MoveLocationInto(mapped, tgtLoc, anchor, log))
+                                {
+                                    rep.Consumed++;
+                                    // 可选：姿态借参考（保持待分配焊点自身位置）
+                                    if (plan.CopyRotation)
+                                    {
+                                        var wp = match.Target.Raw as TxWeldPoint;
+                                        if (wp != null) wp.AbsoluteLocation = PsReader.ArrToTxPublic(ComposeAssignMatrix(plan, match));
+                                    }
+                                    // 可选：复制轨迹参数到移入的 location
+                                    if (plan.CopyParams) CopyTrajectoryParams(refSpot.LocOp, tgtLoc, log);
+                                }
+                                else Fail(rep, $"[{match.Target?.Name}] 移入 _Mapped 失败");
+                            }
+
+                            // 关键：参考占位副本一律删除（匹配与否、移入成败都删），_Mapped 绝不残留参考焊点。
+                            // 参考 MFG 因原参考轨迹仍引用，不会变灰。
                             if (DeleteObject(placeholder.LocOp ?? placeholder.Raw, log)) rep.Created++;
                         }
-                        catch (Exception ex) { Fail(rep, $"[{match.Target?.Name}] {ex.Message}"); }
+                        catch (Exception ex) { Fail(rep, $"[{refSpot?.Name ?? placeholder.Name}] {ex.Message}"); }
                     }
 
                     if (plan.Mode == AllocMode.Symmetric)

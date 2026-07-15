@@ -15,9 +15,9 @@
 //   按上面坐标约定：绕 X=前后翻 / 绕 Y=左右翻 / 绕 Z=上下翻，见 ApplyToolFlip。
 
 using Tecnomatix.Engineering;
-using MyPlugin.ExportGun;
+using TxTools.ExportGun;
 
-namespace MyPlugin.WeldSpotAllocator
+namespace TxTools.WeldSpotAllocator
 {
     public static class SymmetryMath
     {

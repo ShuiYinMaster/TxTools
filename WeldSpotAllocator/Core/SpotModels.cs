@@ -9,9 +9,9 @@
 
 using System.Collections.Generic;
 using Tecnomatix.Engineering;
-using MyPlugin.ExportGun; // PointInfo / PointType / PsReader 静态工具
+using TxTools.ExportGun; // PointInfo / PointType / PsReader 静态工具
 
-namespace MyPlugin.WeldSpotAllocator
+namespace TxTools.WeldSpotAllocator
 {
     /// <summary>三种工作模式。</summary>
     public enum AllocMode
