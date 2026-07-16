@@ -1,60 +1,90 @@
-# TxTools · SnakeGame（贪吃蛇）
+# TxTools.SnakeGame
 
-在 Process Simulate 3D 视图里跑一局贪吃蛇。所有蛇身、食物都是用 `ITxGeometryCreation.CreateSolidBox` 生成的实体（沿用 LineToSolid 的 absLoc = Z-minus 端面中心、单侧 +Z 延伸的语义）。
+在 Process Simulate 场景内玩一局贪吃蛇：蛇头/蛇身/食物都是真实的 3D 实体（`TxSolid` 长方体），移动、吃食物、干涉高亮全部映射到 PS SDK 调用。
 
 ## 文件结构
 
-| 文件 | 作用 |
+| 文件 | 职责 |
 | --- | --- |
-| `SnakeGameCommand.cs` | Ribbon 命令入口（`TxButtonCommand`），打开窗体 |
-| `SnakeGameEngine.cs` | 纯逻辑：网格坐标 / 方向 / 食物刷新 / 越界 / 自碰撞（无 PS 依赖） |
-| `SnakeWorld.cs` | PS 几何：`CreateSolidBox` 创建蛇身与食物，`LocationRelativeToWorkingFrame` 移动；`TxCollisionRoot.CreatePair` 维护干涉集 |
-| `SnakeGameForm.cs` | WinForms 窗体 + Timer 游戏循环 + 键盘输入 |
+| `SnakeGameCommand.cs` | Ribbon 入口，`TxButtonCommand`，点击后非模态弹出游戏窗体 |
+| `SnakeGameEngine.cs` | 纯逻辑：网格坐标、方向、食物生成、越界/自碰撞判定。**不依赖 PS SDK**，可脱离 PS 单独跑单元测试 |
+| `SnakeWorld.cs` | 全部 PS SDK 调用：建模（`TxComponent.CreateSolidBox`）、移动（`LocationRelativeToWorkingFrame`）、干涉集（`TxCollisionRoot` / `TxCollisionPair`） |
+| `SnakeGameForm.cs` | WinForms 窗体：Timer 驱动游戏循环、方向键/WASD 输入、日志区 |
 
 ## 玩法
 
-1. 在 PS 里打开一个 study，运行 `SnakeGame` 命令。
-2. 点 **开始 / 重开**：场景原点生成一个正方体（蛇头），在 `[-10,+10]×[-10,+10]` 网格内随机位置生成一个较小的食物正方体。
-3. 用 **方向键** 或 **WASD** 控制方向，**空格** 暂停/继续。
-4. 蛇头吃到食物：食物移到新随机位置，尾部追加一个新蛇身正方体，并加入到干涉集的 `SecondList`。
-5. 蛇头越界或撞到自己 → 游戏结束。
+1. 打开一个 PS study，点击 Ribbon 上的「贪吃蛇小游戏」。
+2. 点「开始 / 重开」：场景原点生成蛇头，随机位置生成食物。
+3. 方向键 / WASD 控制方向，空格暂停。
+4. 吃到食物：长度 +1，速度按分数阶梯式提升。
+5. 撞到自己或出界：游戏结束，弹窗显示最终得分。
+6. 「清除几何」：手动清空所有蛇身/食物实体和干涉对。
 
-窗体标题栏下方有得分、长度、状态、速度实时显示；底部黑色区是运行日志（含每次吃食物、每次提速、以及所有 PS SDK 调用的失败原因）。
+## 参数（`SnakeGameForm.cs` 顶部常量）
 
-## 关键参数（`SnakeGameForm.cs` 顶部常量）
+| 常量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `GridHalfExtent` | 10 | 网格半边长，21×21 网格 `[-10,10]` |
+| `CellSize` | 60.0 mm | 每格边长，全场约 1.26m × 1.26m |
+| `InitialTickMs` | 200 | 初始移动间隔 |
+| `MinTickMs` | 60 | 最快移动间隔（速度上限） |
+| `SpeedupEveryScore` | 5 | 每吃 N 个食物加速一次 |
+| `SpeedupStepMs` | 20 | 每次加速减少的间隔 |
 
-```csharp
-GridHalfExtent   = 10      // 21×21 网格
-CellSize         = 60.0    // 每格 60mm
-InitialTickMs    = 400     // 起始每步 400ms
-MinTickMs        = 120     // 最低 120ms
-SpeedupEveryScore= 5       // 每 5 分加速一次
-SpeedupStepMs    = 30      // 每次加速缩短 30ms
+蛇身 box 边长 = `CellSize × 0.9`（留视觉间隙），食物 box 边长 = `CellSize × 0.6`。
+
+## 关键设计
+
+### 建模：自建 Resource + `SetModelingScope`
+
+`SnakeWorld.EnsureModelingComponent()` 不依赖 `doc.CurrentModelingWorkingSpace`（该属性只有在 PS 已有活跃建模上下文时才非 null，游戏刚启动时通常是 null）。改为参考 LineToSolid/GeometryBuilder 的做法：
+
+```
+PhysicalRoot.CreateResource(new TxResourceCreationData(resName))
+  → 检查 CanOpenForModeling
+  → comp.SetModelingScope()
+  → 后续所有 CreateSolidBox 复用这个 comp
 ```
 
-## 干涉集（TxCollisionPair）设计
+整局游戏只建一次 Resource（缓存在 `_modelingComponent`），`ClearAll()` 时连同 Resource 一起删除，下次开局自动重建。
 
-- `FirstList`  = `[蛇头]`
-- `SecondList` = `[食物, 蛇身1, 蛇身2, ...]`
-- 每次吃到食物，新增蛇身 box 后立刻 `SecondList.Add(newBody)`。
-- 启动时把 `TxCollisionRoot.CheckCollisions` 置 `true`，游戏结束/清理时恢复原值。
+### `TxBoxCreationData` 的 absLoc 语义
 
-主碰撞判定仍然走网格坐标（可靠、无浮点误差），干涉集主要用于让 PS 界面里能直观看到干涉高亮。`SnakeWorld.IsPairColliding()` 也保留了读取 PS 干涉状态的能力，若您想改成"以 PS 干涉状态触发吃食物"可以直接接入。
+LineToSolid/FenceBuilder 已验证：absLoc 位置 = 长方体 **Z-minus 端面中心**（局部底面），沿 +Z 单侧延伸 `sizeZ`，X/Y 关于 absLoc 对称。所以要让 box 几何中心落在世界坐标 `(cell.X×CellSize, cell.Y×CellSize, 0)`，需要：
 
-## 与 LineToSolid 一致的几何模式
+```
+absLoc.Translation = (cell.X×CellSize, cell.Y×CellSize, -size/2)
+absLoc.zDir = (0,0,1)
+```
 
-- `SetModelingScope()` → `CleanupPrevious()` → `CreateSolidBox(data)`；**不调用 `EndModeling`**（记忆：会 freeze，PS 会自动 finalize）。
-- `TxBoxCreationData.AbsoluteLocation.Translation = (worldX, worldY, -size/2)`，使得 box 几何中心恰好落在 `(worldX, worldY, 0)`。
-- 移动 box 用 `LocationRelativeToWorkingFrame`，退化到反射 `AbsoluteLocation`。
+### 移动：不重建 box，只改 Location
 
-## 可能需要根据实际 PS 版本调整的点
+每 tick 引擎更新 `SnakeCells` 后，UI 层调用 `MoveSnakeBoxTo(i, cell)` → `SnakeWorld.MoveBox`：首选 `ITxLocatableObject.LocationRelativeToWorkingFrame`，失败退化到 `AbsoluteLocation`，再退化到反射兜底。吃到食物才 `CreateSolidBox` 一个新蛇身 append 到末尾；食物 box 全程复用（移动而非重建）。
 
-代码对以下位置做了 `try/catch` + 反射兜底，若编译或运行时报错，看日志区提示对应改：
+### 干涉集：强类型 API
 
-1. **命令基类** — 我用了 `TxButtonCommand`；若您的 TxTools 用别的（如 `TxRegistryCommand`），换基类即可，`Execute` 方法签名保持一致。
-2. **`TxBoxCreationData` 属性名** — 尝试 `AbsoluteLocation`、`AbsLoc` 两个名字。
-3. **`TxCollisionPairCreationData`** — 反射按简单名在 `Tecnomatix.Engineering` 装配里查找，找不到就跳过干涉集（不影响游戏本身）。
-4. **`TxCollisionRoot.CreatePair`** — 依次尝试 `CreatePair` / `CreateCollisionPair` / `CreateChild`，最后扫描单参 `Create*` 方法兜底。
-5. **删除对象** — 依次尝试 `doc.RemoveObject(obj)` / `doc.RemoveObjects(list)` / `obj.Delete()`。
+参考 AutoPathPlanner/CollisionSetService v5.0+ 的经验，干涉集这块**改用强类型调用，不再反射**：
 
-日志区会打印每一次失败点，SHUIYIN 的常规迭代路径：先跑一次 → 看日志 → 定点改。
+```
+TxCollisionRoot root = TxApplication.ActiveDocument.CollisionRoot;
+var data = new TxCollisionPairCreationData { FirstList = first, SecondList = second };
+TxCollisionPair pair = root.CreateCollisionPair(data);
+pair.Active = true;
+root.CheckCollisions = true;   // 游戏结束/清除时恢复原值
+```
+
+- `FirstList` = 蛇头
+- `SecondList` = 食物 + 全部蛇身（吃到食物新增蛇身时 `pair.SecondList.Add(newBox)`）
+- 干涉对仅用于让 PS 3D 视图里看到干涉高亮；主碰撞判定仍走 `SnakeGameEngine` 内部的网格坐标比较（可靠、无浮点误差）
+- `IsPairColliding()` 预留了读取干涉状态的接口，如果想改成"以 PS 干涉信号触发吃食物"可以从这里接入
+
+## 已知的版本相关风险点
+
+以下几处如果您的 PS 2402 SDK 版本行为不同，编译或运行时会报错，可定点修改：
+
+1. **`TxResourceCreationData` 构造签名** —— 目前用单参 `(string name)`，如果 SDK 要求更多参数会在 `EnsureModelingComponent` 报编译错。
+2. **`TxCollisionRoot.CreateCollisionPair` 方法名/签名** —— 如果不存在，日志会打印「未找到 CollisionRoot」或「CreateCollisionPair 返回 null」，不影响游戏本身运行，只是看不到干涉高亮。
+3. **`TxCollisionPair.Active` / `.Name` 属性** —— 已用 try/catch 包裹，缺失也不影响主流程。
+4. **`ITxLocatableObject.LocationRelativeToWorkingFrame` 可写性** —— 已提供 `AbsoluteLocation` 和反射两级兜底。
+
+调试时看窗体内的日志区（黑底文本框），所有失败路径都会打印具体异常信息，按 SHUIYIN 一贯的"跑起来看日志再改"节奏即可。
